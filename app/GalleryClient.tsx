@@ -17,7 +17,7 @@ interface DisplayMedia extends Media {
 }
 
 // ==========================================
-// 獨立的照片卡片元件
+// 獨立的照片卡片元件 (已修復 Android 微抖動與 PC 誤觸 Bug)
 // ==========================================
 const PhotoCard = ({
   pic,
@@ -35,85 +35,77 @@ const PhotoCard = ({
   setGlobalScrollLock: (locked: boolean) => void;
 }) => {
   const [rotate, setRotate] = useState(pic.rotate);
-  const [isReadyToDrag, setIsReadyToDrag] = useState(false); // 新增：是否已經長按完成準備拖曳
+  const [isReadyToDrag, setIsReadyToDrag] = useState(false); 
   const [isDragging, setIsDragging] = useState(false);
   
   const dragControls = useDragControls();
   const timerRef = useRef<NodeJS.Timeout | null>(null);
-  const hasMovedRef = useRef(false); // 記錄用戶是否在長按期間偷滑動了
-  const hasDraggedRef = useRef(false); 
-  const videoRef = useRef<HTMLVideoElement>(null); // 用於修復 iOS 影片縮圖
+  const hasMovedRef = useRef(false); 
+  const startPos = useRef({ x: 0, y: 0 }); // 新增：精準紀錄按下去的座標
+  const videoRef = useRef<HTMLVideoElement>(null); 
 
-  // 【修復 iOS 影片縮圖 Bug】
   useEffect(() => {
     if (pic.isVideo && videoRef.current) {
-      // 強制觸發 iOS Safari 載入第一幀畫面
       videoRef.current.currentTime = 0.001;
     }
   }, [pic.isVideo]);
 
   const handlePointerDown = (e: React.PointerEvent) => {
     bringToFront(pic.id);
+    // 紀錄按下去的初始位置
+    startPos.current = { x: e.clientX, y: e.clientY };
+    
     if (isMobile) {
       hasMovedRef.current = false;
       setIsReadyToDrag(false);
       
-      // 啟動長按計時器 (設定 300ms 體驗最佳)
       timerRef.current = setTimeout(() => {
-        // 如果手指沒偷動，才進入拖曳準備狀態
         if (!hasMovedRef.current) {
           setIsReadyToDrag(true);
-          setGlobalScrollLock(true); // 鎖定背景滾動
-          // 震動回饋
+          setGlobalScrollLock(true); 
           if (typeof window !== "undefined" && window.navigator && window.navigator.vibrate) {
             window.navigator.vibrate(50);
           }
         }
-      }, 300); 
+      }, 300); // 300ms 是體驗最好的長按時間
     }
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
     if (isMobile) {
       if (isReadyToDrag && !isDragging) {
-        // 【修復 Android 拖曳 Bug】：
-        // 在「手指真的移動」的這一個瞬間，才把同步事件 (e) 交給 Framer Motion！
-        // 這樣能完美繞過 Android Chrome 的安全限制。
+        // 長按完成，正式啟動拖曳！
         setIsDragging(true);
-        hasDraggedRef.current = true;
         try {
           dragControls.start(e, { snapToCursor: false });
         } catch (err) {
           console.error("Drag start failed", err);
         }
       } else if (!isReadyToDrag && !isDragging) {
-        // 使用者在計時器結束前就移動手指了（代表他只是想滑網頁）
-        hasMovedRef.current = true;
-        if (timerRef.current) {
-          clearTimeout(timerRef.current);
-          timerRef.current = null;
+        // 【修復 Android Bug】：容忍 10px 內的微抖動
+        const dx = Math.abs(e.clientX - startPos.current.x);
+        const dy = Math.abs(e.clientY - startPos.current.y);
+        if (dx > 10 || dy > 10) {
+          hasMovedRef.current = true;
+          if (timerRef.current) {
+            clearTimeout(timerRef.current);
+            timerRef.current = null;
+          }
         }
       }
     }
   };
 
-  // 統一處理「手指離開螢幕」與「拖曳結束」的復原邏輯
   const endInteraction = () => {
     if (timerRef.current) {
       clearTimeout(timerRef.current);
       timerRef.current = null;
     }
-    
-    // 【修復卡死 Bug】：只要有進入準備狀態或拖曳狀態，放開時一律解鎖並旋轉
     if (isReadyToDrag || isDragging) {
       setIsReadyToDrag(false);
       setIsDragging(false);
       setGlobalScrollLock(false);
-      setRotate(Math.floor(Math.random() * 20) - 10); // 賦予新角度
-      
-      setTimeout(() => {
-        hasDraggedRef.current = false;
-      }, 100);
+      setRotate(Math.floor(Math.random() * 20) - 10); 
     }
   };
 
@@ -126,34 +118,40 @@ const PhotoCard = ({
       dragElastic={0.4}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
-      onPointerUp={endInteraction}       // 手指離開時觸發
-      onPointerCancel={endInteraction}   // 被系統中斷時觸發
-      onDragEnd={endInteraction}         // Framer Motion 拖曳結束時觸發
+      onPointerUp={endInteraction}       
+      onPointerCancel={endInteraction}   
+      onDragEnd={endInteraction}         
       onContextMenu={(e) => {
-        if (isMobile) e.preventDefault(); // 防止跳出「儲存圖片」選單
+        if (isMobile) e.preventDefault(); 
       }}
       whileDrag={{ scale: 1.05, zIndex: 1000 }}
       animate={{ rotate: rotate, scale: isDragging ? 1.05 : 1 }}
       initial={{ opacity: 0, y: 20 }}
       whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true }}
-      // 加入 WebkitUserSelect 徹底防止行動裝置選取干擾
       style={{ 
         zIndex: isDragging ? 1000 : zIndex,
         WebkitTouchCallout: "none",
         WebkitUserSelect: "none",
         userSelect: "none"
       }}
-      className={`bg-white p-2 pb-4 md:p-4 md:pb-6 shadow-lg select-none
+      className={`bg-white p-2 pb-4 md:p-4 md:pb-6 shadow-lg select-none flex flex-col items-center
+        w-[156px] md:w-[282px] /* <--- 這裡控制外層白色相框寬度 */
         ${!isMobile ? "cursor-grab active:cursor-grabbing" : ""}
         ${isDragging ? "cursor-grabbing shadow-2xl ring-4 ring-black/10" : ""}
       `}
     >
-      {/* 縮圖區 */}
       <div
-        className="relative overflow-hidden bg-gray-100 w-[140px] h-[140px] md:w-[250px] md:h-[250px]"
-        onClick={() => {
-          if (!hasDraggedRef.current && !isDragging) onSelect(pic);
+        className="relative overflow-hidden bg-gray-100 
+          w-[140px] h-[140px] md:w-[250px] md:h-[250px]" /* <--- 這裡控制內部照片/影片的尺寸 */
+        onClick={(e) => {
+          // 【修復 PC 誤觸 Bug】：精準計算距離，超過 5px 視為拖曳，拒絕放大
+          const dx = Math.abs(e.clientX - startPos.current.x);
+          const dy = Math.abs(e.clientY - startPos.current.y);
+          if (dx > 5 || dy > 5 || isDragging) {
+            return;
+          }
+          onSelect(pic);
         }}
       >
         {pic.isVideo ? (
@@ -184,7 +182,8 @@ const PhotoCard = ({
         )}
       </div>
 
-      <div className="mt-3 text-center h-[40px] md:h-[48px] flex flex-col justify-start items-center w-full">
+      <div className="mt-3 text-center flex flex-col justify-start items-center w-full
+        h-[40px] md:h-[48px]">
         <h1 className="text-[10px] md:text-sm font-bold text-gray-700 truncate w-full px-1">
           {pic.title || "\u00A0"}
         </h1>
