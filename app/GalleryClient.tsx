@@ -17,7 +17,7 @@ interface DisplayMedia extends Media {
 }
 
 // ==========================================
-// 獨立的照片卡片元件 (解決手機版拖曳與狀態管理的關鍵)
+// 獨立的照片卡片元件
 // ==========================================
 const PhotoCard = ({
   pic,
@@ -35,91 +35,115 @@ const PhotoCard = ({
   setGlobalScrollLock: (locked: boolean) => void;
 }) => {
   const [rotate, setRotate] = useState(pic.rotate);
+  const [isReadyToDrag, setIsReadyToDrag] = useState(false); // 新增：是否已經長按完成準備拖曳
   const [isDragging, setIsDragging] = useState(false);
   
-  // 用來精準控制何時啟動拖曳
   const dragControls = useDragControls();
   const timerRef = useRef<NodeJS.Timeout | null>(null);
-  const hasDraggedRef = useRef(false); // 防止拖曳結束時誤觸點擊放大
+  const hasMovedRef = useRef(false); // 記錄用戶是否在長按期間偷滑動了
+  const hasDraggedRef = useRef(false); 
+  const videoRef = useRef<HTMLVideoElement>(null); // 用於修復 iOS 影片縮圖
+
+  // 【修復 iOS 影片縮圖 Bug】
+  useEffect(() => {
+    if (pic.isVideo && videoRef.current) {
+      // 強制觸發 iOS Safari 載入第一幀畫面
+      videoRef.current.currentTime = 0.001;
+    }
+  }, [pic.isVideo]);
 
   const handlePointerDown = (e: React.PointerEvent) => {
     bringToFront(pic.id);
     if (isMobile) {
-      // 啟動長按計時器 (250ms)
+      hasMovedRef.current = false;
+      setIsReadyToDrag(false);
+      
+      // 啟動長按計時器 (設定 300ms 體驗最佳)
       timerRef.current = setTimeout(() => {
-        setIsDragging(true);
-        setGlobalScrollLock(true); // 鎖定背景滾動
-        try {
-          // 手動將原本的觸控事件交給 Framer Motion 啟動拖曳
-          dragControls.start(e, { snapToCursor: false });
-          // 若手機支援，給予微小的震動回饋，提升手感
+        // 如果手指沒偷動，才進入拖曳準備狀態
+        if (!hasMovedRef.current) {
+          setIsReadyToDrag(true);
+          setGlobalScrollLock(true); // 鎖定背景滾動
+          // 震動回饋
           if (typeof window !== "undefined" && window.navigator && window.navigator.vibrate) {
             window.navigator.vibrate(50);
           }
+        }
+      }, 300); 
+    }
+  };
+
+  const handlePointerMove = (e: React.PointerEvent) => {
+    if (isMobile) {
+      if (isReadyToDrag && !isDragging) {
+        // 【修復 Android 拖曳 Bug】：
+        // 在「手指真的移動」的這一個瞬間，才把同步事件 (e) 交給 Framer Motion！
+        // 這樣能完美繞過 Android Chrome 的安全限制。
+        setIsDragging(true);
+        hasDraggedRef.current = true;
+        try {
+          dragControls.start(e, { snapToCursor: false });
         } catch (err) {
           console.error("Drag start failed", err);
         }
-      }, 250); 
+      } else if (!isReadyToDrag && !isDragging) {
+        // 使用者在計時器結束前就移動手指了（代表他只是想滑網頁）
+        hasMovedRef.current = true;
+        if (timerRef.current) {
+          clearTimeout(timerRef.current);
+          timerRef.current = null;
+        }
+      }
     }
   };
 
-  const handlePointerMove = () => {
-    // 如果在 400ms 內手指移動了 (代表用戶想滾動網頁)，就取消長按判定
-    if (isMobile && !isDragging && timerRef.current) {
-      clearTimeout(timerRef.current);
-      timerRef.current = null;
-    }
-  };
-
-  const handlePointerUp = () => {
+  // 統一處理「手指離開螢幕」與「拖曳結束」的復原邏輯
+  const endInteraction = () => {
     if (timerRef.current) {
       clearTimeout(timerRef.current);
       timerRef.current = null;
     }
-  };
-
-  const handleDragStart = () => {
-    hasDraggedRef.current = true;
-  };
-
-  const handleDragEnd = () => {
-    if (isMobile) {
-      setIsDragging(false);
-      setGlobalScrollLock(false); // 解除背景滾動鎖定
-    }
-    // 放開時隨機改變旋轉角度
-    setRotate(Math.floor(Math.random() * 20) - 10);
     
-    // 延遲重置點擊防護，避免放開瞬間觸發 Lightbox
-    setTimeout(() => {
-      hasDraggedRef.current = false;
-    }, 100);
+    // 【修復卡死 Bug】：只要有進入準備狀態或拖曳狀態，放開時一律解鎖並旋轉
+    if (isReadyToDrag || isDragging) {
+      setIsReadyToDrag(false);
+      setIsDragging(false);
+      setGlobalScrollLock(false);
+      setRotate(Math.floor(Math.random() * 20) - 10); // 賦予新角度
+      
+      setTimeout(() => {
+        hasDraggedRef.current = false;
+      }, 100);
+    }
   };
 
   return (
     <motion.div
       drag
-      // 電腦版使用預設拖曳，手機版關閉預設，改用 dragControls 手動觸發
       dragListener={!isMobile} 
       dragControls={dragControls}
       dragConstraints={{ top: 0, left: 0, right: 0, bottom: 0 }}
       dragElastic={0.4}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
-      onPointerUp={handlePointerUp}
-      onPointerCancel={handlePointerUp}
-      onDragStart={handleDragStart}
-      onDragEnd={handleDragEnd}
+      onPointerUp={endInteraction}       // 手指離開時觸發
+      onPointerCancel={endInteraction}   // 被系統中斷時觸發
+      onDragEnd={endInteraction}         // Framer Motion 拖曳結束時觸發
       onContextMenu={(e) => {
-        // 防止手機長按時跳出瀏覽器的「儲存圖片」選單干擾拖曳
-        if (isMobile) e.preventDefault();
+        if (isMobile) e.preventDefault(); // 防止跳出「儲存圖片」選單
       }}
       whileDrag={{ scale: 1.05, zIndex: 1000 }}
       animate={{ rotate: rotate, scale: isDragging ? 1.05 : 1 }}
       initial={{ opacity: 0, y: 20 }}
       whileInView={{ opacity: 1, y: 0 }}
       viewport={{ once: true }}
-      style={{ zIndex: isDragging ? 1000 : zIndex }}
+      // 加入 WebkitUserSelect 徹底防止行動裝置選取干擾
+      style={{ 
+        zIndex: isDragging ? 1000 : zIndex,
+        WebkitTouchCallout: "none",
+        WebkitUserSelect: "none",
+        userSelect: "none"
+      }}
       className={`bg-white p-2 pb-4 md:p-4 md:pb-6 shadow-lg select-none
         ${!isMobile ? "cursor-grab active:cursor-grabbing" : ""}
         ${isDragging ? "cursor-grabbing shadow-2xl ring-4 ring-black/10" : ""}
@@ -129,19 +153,18 @@ const PhotoCard = ({
       <div
         className="relative overflow-hidden bg-gray-100 w-[140px] h-[140px] md:w-[250px] md:h-[250px]"
         onClick={() => {
-          // 確保不是在拖曳結束的瞬間才觸發放大
           if (!hasDraggedRef.current && !isDragging) onSelect(pic);
         }}
       >
         {pic.isVideo ? (
           <>
-            {/* 【修復 iOS Bug】：加上 #t=0.001 強迫 Safari 渲染第一幀縮圖，並加入 playsInline muted */}
             <video 
+              ref={videoRef}
               src={`${pic.src}#t=0.001`} 
               preload="metadata" 
               playsInline 
               muted 
-              className="object-cover w-full h-full pointer-events-none" 
+              className="object-cover w-full h-full pointer-events-none bg-gray-200" 
             />
             <div className="absolute bottom-2 right-2 bg-black/50 backdrop-blur-md rounded-full p-2 shadow-sm">
               <svg className="w-4 h-4 md:w-5 md:h-5 text-white ml-0.5" fill="currentColor" viewBox="0 0 24 24">
@@ -161,7 +184,6 @@ const PhotoCard = ({
         )}
       </div>
 
-      {/* 文字區塊 - 修改重點：設定固定高度 (h-[40px] / md:h-[48px]) 保證畫框大小一致 */}
       <div className="mt-3 text-center h-[40px] md:h-[48px] flex flex-col justify-start items-center w-full">
         <h1 className="text-[10px] md:text-sm font-bold text-gray-700 truncate w-full px-1">
           {pic.title || "\u00A0"}
@@ -183,13 +205,11 @@ export default function GalleryClient({ initialPictures }: { initialPictures: Me
   const [zIndexes, setZIndexes] = useState<Record<string, number>>({});
   const [selectedPic, setSelectedPic] = useState<DisplayMedia | null>(null);
   
-  // 全域狀態
   const [isMobile, setIsMobile] = useState(false);
   const [globalScrollLock, setGlobalScrollLock] = useState(false);
   
   const observerTarget = useRef(null);
 
-  // 初始化資料與偵測裝置
   useEffect(() => {
     const processed = initialPictures.map((p, i) => ({
       ...p,
@@ -209,16 +229,13 @@ export default function GalleryClient({ initialPictures }: { initialPictures: Me
     return () => window.removeEventListener("resize", checkMobile);
   }, [initialPictures]);
 
-  // 統一管理背景滾動鎖定 (包含 Lightbox 放大與手機長按拖曳時)
   useEffect(() => {
-    // 解決手機端「滑動脫手」的關鍵：強制阻擋原生 touchmove
     const preventNativeScroll = (e: TouchEvent) => {
       e.preventDefault();
     };
 
     if (selectedPic || globalScrollLock) {
       document.body.style.overflow = "hidden";
-      // { passive: false } 是必須的，這樣瀏覽器才會允許我們使用 preventDefault() 來取消滾動
       document.addEventListener("touchmove", preventNativeScroll, { passive: false });
     } else {
       document.body.style.overflow = "auto";
@@ -231,7 +248,6 @@ export default function GalleryClient({ initialPictures }: { initialPictures: Me
     };
   }, [selectedPic, globalScrollLock]);
 
-  // 無限捲動邏輯
   useEffect(() => {
     const observer = new IntersectionObserver(
       (entries) => {
@@ -272,16 +288,14 @@ export default function GalleryClient({ initialPictures }: { initialPictures: Me
         {visibleCount < pics.length && <p className="text-gray-400 text-sm tracking-widest">載入中...</p>}
       </div>
 
-      {/* Lightbox 放大檢視 */}
       <AnimatePresence>
         {selectedPic && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            // 在背景加上 cursor-pointer，提示用戶這裡可以點擊
             className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/90 backdrop-blur-md p-4 md:p-12 cursor-pointer"
-            onClick={() => setSelectedPic(null)} // 點擊背景任何地方即可關閉
+            onClick={() => setSelectedPic(null)} 
           >
             <button 
               className="absolute top-6 right-6 md:top-10 md:right-10 text-white/70 hover:text-white transition-colors p-2 z-50"
@@ -292,19 +306,16 @@ export default function GalleryClient({ initialPictures }: { initialPictures: Me
               </svg>
             </button>
 
-            {/* 移除原本的 w-full 容器，讓圖片/影片自由決定寬度。
-                並將 e.stopPropagation() 綁定在媒體元件上，這樣點擊影像本體才不會關閉視窗 */}
             {selectedPic.isVideo ? (
               <video 
                 src={selectedPic.src} 
                 controls 
                 autoPlay 
-                playsInline // 加上 playsInline 讓手機端不會強制全螢幕播放
+                playsInline 
                 className="max-w-full max-h-[85vh] rounded-md shadow-2xl outline-none cursor-default" 
                 onClick={(e) => e.stopPropagation()} 
               />
             ) : (
-              // 放大檢視原本就不需要 Next.js 的 Image 優化，直接用 <img> 標籤最簡單乾淨，也能完美貼合大小
               <img
                 src={selectedPic.src}
                 alt="Full view"
