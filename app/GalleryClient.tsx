@@ -1,6 +1,6 @@
 "use client";
 
-import { motion, AnimatePresence } from "framer-motion";
+import { motion, AnimatePresence, useDragControls } from "framer-motion";
 import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
 
@@ -16,16 +16,169 @@ interface DisplayMedia extends Media {
   id: string;
 }
 
+// ==========================================
+// 獨立的照片卡片元件 (解決手機版拖曳與狀態管理的關鍵)
+// ==========================================
+const PhotoCard = ({
+  pic,
+  zIndex,
+  bringToFront,
+  isMobile,
+  onSelect,
+  setGlobalScrollLock,
+}: {
+  pic: DisplayMedia;
+  zIndex: number;
+  bringToFront: (id: string) => void;
+  isMobile: boolean;
+  onSelect: (pic: DisplayMedia) => void;
+  setGlobalScrollLock: (locked: boolean) => void;
+}) => {
+  const [rotate, setRotate] = useState(pic.rotate);
+  const [isDragging, setIsDragging] = useState(false);
+  
+  // 用來精準控制何時啟動拖曳
+  const dragControls = useDragControls();
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const hasDraggedRef = useRef(false); // 防止拖曳結束時誤觸點擊放大
+
+  const handlePointerDown = (e: React.PointerEvent) => {
+    bringToFront(pic.id);
+    if (isMobile) {
+      // 啟動長按計時器 (400ms)
+      timerRef.current = setTimeout(() => {
+        setIsDragging(true);
+        setGlobalScrollLock(true); // 鎖定背景滾動
+        try {
+          // 手動將原本的觸控事件交給 Framer Motion 啟動拖曳
+          dragControls.start(e, { snapToCursor: false });
+          // 若手機支援，給予微小的震動回饋，提升手感
+          if (typeof window !== "undefined" && window.navigator && window.navigator.vibrate) {
+            window.navigator.vibrate(50);
+          }
+        } catch (err) {
+          console.error("Drag start failed", err);
+        }
+      }, 400); 
+    }
+  };
+
+  const handlePointerMove = () => {
+    // 如果在 400ms 內手指移動了 (代表用戶想滾動網頁)，就取消長按判定
+    if (isMobile && !isDragging && timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+
+  const handlePointerUp = () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+  };
+
+  const handleDragStart = () => {
+    hasDraggedRef.current = true;
+  };
+
+  const handleDragEnd = () => {
+    if (isMobile) {
+      setIsDragging(false);
+      setGlobalScrollLock(false); // 解除背景滾動鎖定
+    }
+    // 放開時隨機改變旋轉角度
+    setRotate(Math.floor(Math.random() * 20) - 10);
+    
+    // 延遲重置點擊防護，避免放開瞬間觸發 Lightbox
+    setTimeout(() => {
+      hasDraggedRef.current = false;
+    }, 100);
+  };
+
+  return (
+    <motion.div
+      drag
+      // 電腦版使用預設拖曳，手機版關閉預設，改用 dragControls 手動觸發
+      dragListener={!isMobile} 
+      dragControls={dragControls}
+      dragConstraints={{ top: 0, left: 0, right: 0, bottom: 0 }}
+      dragElastic={0.4}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+      onPointerCancel={handlePointerUp}
+      onDragStart={handleDragStart}
+      onDragEnd={handleDragEnd}
+      onContextMenu={(e) => {
+        // 防止手機長按時跳出瀏覽器的「儲存圖片」選單干擾拖曳
+        if (isMobile) e.preventDefault();
+      }}
+      whileDrag={{ scale: 1.05, zIndex: 1000 }}
+      animate={{ rotate: rotate, scale: isDragging ? 1.05 : 1 }}
+      initial={{ opacity: 0, y: 20 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true }}
+      style={{ zIndex: isDragging ? 1000 : zIndex }}
+      className={`bg-white p-2 pb-4 md:p-4 md:pb-6 shadow-lg select-none
+        ${!isMobile ? "cursor-grab active:cursor-grabbing" : ""}
+        ${isDragging ? "cursor-grabbing shadow-2xl ring-4 ring-black/10" : ""}
+      `}
+    >
+      {/* 縮圖區 */}
+      <div
+        className="relative overflow-hidden bg-gray-100 w-[140px] h-[140px] md:w-[250px] md:h-[250px]"
+        onClick={() => {
+          // 確保不是在拖曳結束的瞬間才觸發放大
+          if (!hasDraggedRef.current && !isDragging) onSelect(pic);
+        }}
+      >
+        {pic.isVideo ? (
+          <>
+            <video src={pic.src} preload="metadata" className="object-cover w-full h-full pointer-events-none" />
+            <div className="absolute bottom-2 right-2 bg-black/50 backdrop-blur-md rounded-full p-2 shadow-sm">
+              <svg className="w-4 h-4 md:w-5 md:h-5 text-white ml-0.5" fill="currentColor" viewBox="0 0 24 24">
+                <path d="M8 5v14l11-7z" />
+              </svg>
+            </div>
+          </>
+        ) : (
+          <Image
+            src={pic.src}
+            alt={pic.title || pic.date}
+            fill
+            sizes="(max-width: 768px) 140px, 250px"
+            className="object-cover pointer-events-none"
+            priority={false}
+          />
+        )}
+      </div>
+
+      {/* 文字區塊 - 修改重點：設定固定高度 (h-[40px] / md:h-[48px]) 保證畫框大小一致 */}
+      <div className="mt-3 text-center h-[40px] md:h-[48px] flex flex-col justify-start items-center w-full">
+        <h1 className="text-[10px] md:text-sm font-bold text-gray-700 truncate w-full px-1">
+          {pic.title || "\u00A0"}
+        </h1>
+        <p className="text-[10px] md:text-xs text-gray-400 mt-1 font-mono w-full">
+          {pic.date || "\u00A0"}
+        </p>
+      </div>
+    </motion.div>
+  );
+};
+
+// ==========================================
+// 主要 Gallery 容器
+// ==========================================
 export default function GalleryClient({ initialPictures }: { initialPictures: Media[] }) {
   const [pics, setPics] = useState<DisplayMedia[]>([]);
   const [visibleCount, setVisibleCount] = useState(15);
   const [zIndexes, setZIndexes] = useState<Record<string, number>>({});
   const [selectedPic, setSelectedPic] = useState<DisplayMedia | null>(null);
   
-  // 手機版互動相關狀態
+  // 全域狀態
   const [isMobile, setIsMobile] = useState(false);
-  const [dragEnabledId, setDragEnabledId] = useState<string | null>(null);
-  const pressTimer = useRef<NodeJS.Timeout | null>(null);
+  const [globalScrollLock, setGlobalScrollLock] = useState(false);
   
   const observerTarget = useRef(null);
 
@@ -43,22 +196,33 @@ export default function GalleryClient({ initialPictures }: { initialPictures: Me
     shuffled.forEach((p, i) => { initialZ[p.id] = i; });
     setZIndexes(initialZ);
 
-    // 偵測是否為手機螢幕
     const checkMobile = () => setIsMobile(window.innerWidth <= 768);
     checkMobile();
     window.addEventListener("resize", checkMobile);
     return () => window.removeEventListener("resize", checkMobile);
   }, [initialPictures]);
 
-  // 鎖定背景滾動 (要求 1)
+  // 統一管理背景滾動鎖定 (包含 Lightbox 放大與手機長按拖曳時)
   useEffect(() => {
-    if (selectedPic) {
+    // 解決手機端「滑動脫手」的關鍵：強制阻擋原生 touchmove
+    const preventNativeScroll = (e: TouchEvent) => {
+      e.preventDefault();
+    };
+
+    if (selectedPic || globalScrollLock) {
       document.body.style.overflow = "hidden";
+      // { passive: false } 是必須的，這樣瀏覽器才會允許我們使用 preventDefault() 來取消滾動
+      document.addEventListener("touchmove", preventNativeScroll, { passive: false });
     } else {
       document.body.style.overflow = "auto";
+      document.removeEventListener("touchmove", preventNativeScroll);
     }
-    return () => { document.body.style.overflow = "auto"; };
-  }, [selectedPic]);
+    
+    return () => { 
+      document.body.style.overflow = "auto"; 
+      document.removeEventListener("touchmove", preventNativeScroll);
+    };
+  }, [selectedPic, globalScrollLock]);
 
   // 無限捲動邏輯
   useEffect(() => {
@@ -81,90 +245,19 @@ export default function GalleryClient({ initialPictures }: { initialPictures: Me
     });
   };
 
-  const handleDragEnd = (id: string) => {
-    setPics((prev) =>
-      prev.map((p) => p.id === id ? { ...p, rotate: Math.floor(Math.random() * 20) - 10 } : p)
-    );
-  };
-
-  // 手機版長按邏輯 (要求 2)
-  const handlePointerDown = (id: string) => {
-    bringToFront(id);
-    if (isMobile) {
-      pressTimer.current = setTimeout(() => {
-        setDragEnabledId(id); // 按住 500ms 後解鎖拖曳
-      }, 500);
-    }
-  };
-
-  const handlePointerUpOrCancel = () => {
-    if (pressTimer.current) clearTimeout(pressTimer.current);
-    if (isMobile) setDragEnabledId(null); // 放開後鎖回拖曳
-  };
-
   return (
     <div className="min-h-screen bg-[#f0f0f0] bg-[url('/black-linen.png')] py-12 px-4">
       <div className="max-w-6xl mx-auto flex flex-wrap justify-center gap-6 md:gap-12">
         {pics.slice(0, visibleCount).map((pic) => (
-          <motion.div
+          <PhotoCard
             key={pic.id}
-            // 只有電腦版，或是手機版且被長按解鎖時，才允許拖曳
-            drag={!isMobile || dragEnabledId === pic.id} 
-            dragConstraints={{ top: 0, left: 0, right: 0, bottom: 0 }}
-            dragElastic={0.4}
-            onPointerDown={() => handlePointerDown(pic.id)}
-            onPointerUp={handlePointerUpOrCancel}
-            onPointerCancel={handlePointerUpOrCancel}
-            onDragEnd={() => handleDragEnd(pic.id)}
-            whileDrag={{ scale: 1.1, zIndex: 1000 }}
-            animate={{ rotate: pic.rotate }}
-            initial={{ opacity: 0, y: 20 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            style={{ zIndex: zIndexes[pic.id] || 1 }}
-            className={`bg-white p-2 pb-6 md:p-4 md:pb-10 shadow-lg select-none 
-              ${(!isMobile || dragEnabledId === pic.id) ? 'cursor-grab active:cursor-grabbing' : ''}`}
-          >
-            {/* 縮圖區 */}
-            <div 
-              className="relative overflow-hidden bg-gray-100 w-[140px] h-[140px] md:w-[250px] md:h-[250px]"
-              onClick={() => {
-                // 如果不是在拖曳狀態才觸發點擊放大
-                if (!isMobile || dragEnabledId !== pic.id) setSelectedPic(pic);
-              }}
-            >
-              {pic.isVideo ? (
-                <>
-                  <video src={pic.src} preload="metadata" className="object-cover w-full h-full pointer-events-none" />
-                  {/* 影片播放提示 Icon (要求 5) */}
-                  <div className="absolute bottom-2 right-2 bg-black/50 backdrop-blur-md rounded-full p-2 shadow-sm">
-                    <svg className="w-4 h-4 md:w-5 md:h-5 text-white ml-0.5" fill="currentColor" viewBox="0 0 24 24">
-                      <path d="M8 5v14l11-7z" />
-                    </svg>
-                  </div>
-                </>
-              ) : (
-                <Image
-                  src={pic.src}
-                  alt={pic.title || pic.date}
-                  fill
-                  sizes="(max-width: 768px) 140px, 250px"
-                  className="object-cover pointer-events-none"
-                  priority={false}
-                />
-              )}
-            </div>
-            
-            {/* 文字區塊 */}
-            <div className="mt-3 text-center">
-              <h1 className="text-[10px] md:text-sm font-bold text-gray-700 truncate px-1 max-w-[140px] md:max-w-[250px]">
-                {pic.title || " "}
-              </h1>
-              <p className="text-[10px] md:text-xs text-gray-400 mt-1 font-mono">
-                {pic.date}
-              </p>
-            </div>
-          </motion.div>
+            pic={pic}
+            zIndex={zIndexes[pic.id] || 1}
+            bringToFront={bringToFront}
+            isMobile={isMobile}
+            onSelect={setSelectedPic}
+            setGlobalScrollLock={setGlobalScrollLock}
+          />
         ))}
       </div>
 
@@ -172,7 +265,7 @@ export default function GalleryClient({ initialPictures }: { initialPictures: Me
         {visibleCount < pics.length && <p className="text-gray-400 text-sm tracking-widest">載入中...</p>}
       </div>
 
-      {/* Lightbox 放大檢視 (要求 4 & 5) */}
+      {/* Lightbox 放大檢視 */}
       <AnimatePresence>
         {selectedPic && (
           <motion.div
@@ -182,7 +275,6 @@ export default function GalleryClient({ initialPictures }: { initialPictures: Me
             className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/90 backdrop-blur-md p-4 md:p-12"
             onClick={() => setSelectedPic(null)}
           >
-            {/* 獨立的關閉按鈕 */}
             <button 
               className="absolute top-6 right-6 md:top-10 md:right-10 text-white/70 hover:text-white transition-colors p-2 z-50"
               onClick={() => setSelectedPic(null)}
@@ -192,10 +284,9 @@ export default function GalleryClient({ initialPictures }: { initialPictures: Me
               </svg>
             </button>
 
-            {/* 內容容器：限制最大長寬 */}
             <div 
               className="relative w-full max-w-5xl max-h-[85vh] flex items-center justify-center"
-              onClick={(e) => e.stopPropagation()} // 防止點到圖片/影片本體關閉視窗
+              onClick={(e) => e.stopPropagation()} 
             >
               {selectedPic.isVideo ? (
                 <video 
