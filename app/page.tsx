@@ -13,19 +13,21 @@ export default function Page() {
     console.error("找不到 public/Images 資料夾！");
   }
 
-  // 只過濾圖片，不做隨機處理
-  const pictures = fileNames
-    .filter((file) => /\.(jpg|jpeg|png|gif|webp)$/i.test(file))
+  // 優化：支援圖片與影片格式，並預先判斷檔案類型
+  const mediaFiles = fileNames
+    .filter((file) => /\.(jpg|jpeg|png|gif|webp|mp4|mov|webm)$/i.test(file))
     .map((file) => {
       const nameWithoutExt = file.replace(/\.[^/.]+$/, "");
       const parts = nameWithoutExt.split("_");
+      const isVideo = /\.(mp4|mov|webm)$/i.test(file);
+
       return {
         src: `/Images/${file}`,
         date: parts[0] || "",
         title: parts.length > 1 ? parts[1] : "",
+        isVideo, // 傳遞給 Client 判斷
       };
     });
 
-  // 把穩定的圖片清單傳給 Client
-  return <GalleryClient initialPictures={pictures} />;
+  return <GalleryClient initialPictures={mediaFiles} />;
 }
