@@ -143,7 +143,7 @@ const PhotoCard = ({
     >
       <div
         className="relative overflow-hidden bg-gray-100 
-          w-[140px] h-[140px] md:w-[250px] md:h-[250px]" /* <--- 這裡控制內部照片/影片的尺寸 */
+          w-[140px] h-[150px] md:w-[250px] md:h-[250px]" /* <--- 這裡控制內部照片/影片的尺寸 */
         onClick={(e) => {
           // 【修復 PC 誤觸 Bug】：精準計算距離，超過 5px 視為拖曳，拒絕放大
           const dx = Math.abs(e.clientX - startPos.current.x);
@@ -183,7 +183,7 @@ const PhotoCard = ({
       </div>
 
       <div className="mt-3 text-center flex flex-col justify-start items-center w-full
-        h-[40px] md:h-[48px]">
+        h-[40px] md:h-[48px]"> 
         <h1 className="text-[10px] md:text-sm font-bold text-gray-700 truncate w-full px-1">
           {pic.title || "\u00A0"}
         </h1>
