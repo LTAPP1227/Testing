@@ -45,7 +45,7 @@ const PhotoCard = ({
   const handlePointerDown = (e: React.PointerEvent) => {
     bringToFront(pic.id);
     if (isMobile) {
-      // 啟動長按計時器 (400ms)
+      // 啟動長按計時器 (250ms)
       timerRef.current = setTimeout(() => {
         setIsDragging(true);
         setGlobalScrollLock(true); // 鎖定背景滾動
@@ -59,7 +59,7 @@ const PhotoCard = ({
         } catch (err) {
           console.error("Drag start failed", err);
         }
-      }, 400); 
+      }, 250); 
     }
   };
 
@@ -135,7 +135,14 @@ const PhotoCard = ({
       >
         {pic.isVideo ? (
           <>
-            <video src={pic.src} preload="metadata" className="object-cover w-full h-full pointer-events-none" />
+            {/* 【修復 iOS Bug】：加上 #t=0.001 強迫 Safari 渲染第一幀縮圖，並加入 playsInline muted */}
+            <video 
+              src={`${pic.src}#t=0.001`} 
+              preload="metadata" 
+              playsInline 
+              muted 
+              className="object-cover w-full h-full pointer-events-none" 
+            />
             <div className="absolute bottom-2 right-2 bg-black/50 backdrop-blur-md rounded-full p-2 shadow-sm">
               <svg className="w-4 h-4 md:w-5 md:h-5 text-white ml-0.5" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M8 5v14l11-7z" />
@@ -272,8 +279,9 @@ export default function GalleryClient({ initialPictures }: { initialPictures: Me
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/90 backdrop-blur-md p-4 md:p-12"
-            onClick={() => setSelectedPic(null)}
+            // 在背景加上 cursor-pointer，提示用戶這裡可以點擊
+            className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/90 backdrop-blur-md p-4 md:p-12 cursor-pointer"
+            onClick={() => setSelectedPic(null)} // 點擊背景任何地方即可關閉
           >
             <button 
               className="absolute top-6 right-6 md:top-10 md:right-10 text-white/70 hover:text-white transition-colors p-2 z-50"
@@ -284,29 +292,26 @@ export default function GalleryClient({ initialPictures }: { initialPictures: Me
               </svg>
             </button>
 
-            <div 
-              className="relative w-full max-w-5xl max-h-[85vh] flex items-center justify-center"
-              onClick={(e) => e.stopPropagation()} 
-            >
-              {selectedPic.isVideo ? (
-                <video 
-                  src={selectedPic.src} 
-                  controls 
-                  autoPlay 
-                  className="max-w-full max-h-[85vh] rounded-md shadow-2xl outline-none" 
-                />
-              ) : (
-                <div className="relative w-full h-[85vh]">
-                  <Image
-                    src={selectedPic.src}
-                    alt="Full view"
-                    fill
-                    className="object-contain drop-shadow-2xl"
-                    unoptimized={true}
-                  />
-                </div>
-              )}
-            </div>
+            {/* 移除原本的 w-full 容器，讓圖片/影片自由決定寬度。
+                並將 e.stopPropagation() 綁定在媒體元件上，這樣點擊影像本體才不會關閉視窗 */}
+            {selectedPic.isVideo ? (
+              <video 
+                src={selectedPic.src} 
+                controls 
+                autoPlay 
+                playsInline // 加上 playsInline 讓手機端不會強制全螢幕播放
+                className="max-w-full max-h-[85vh] rounded-md shadow-2xl outline-none cursor-default" 
+                onClick={(e) => e.stopPropagation()} 
+              />
+            ) : (
+              // 放大檢視原本就不需要 Next.js 的 Image 優化，直接用 <img> 標籤最簡單乾淨，也能完美貼合大小
+              <img
+                src={selectedPic.src}
+                alt="Full view"
+                className="max-w-full max-h-[85vh] object-contain drop-shadow-2xl cursor-default"
+                onClick={(e) => e.stopPropagation()} 
+              />
+            )}
           </motion.div>
         )}
       </AnimatePresence>
