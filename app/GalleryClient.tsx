@@ -101,11 +101,14 @@ const PhotoCard = ({
       clearTimeout(timerRef.current);
       timerRef.current = null;
     }
-    if (isReadyToDrag || isDragging) {
-      setIsReadyToDrag(false);
-      setIsDragging(false);
-      setGlobalScrollLock(false);
-      setRotate(Math.floor(Math.random() * 20) - 10); 
+
+    const shouldRotate = isReadyToDrag || isDragging;
+    setIsReadyToDrag(false);
+    setIsDragging(false);
+    setGlobalScrollLock(false);
+
+    if (shouldRotate) {
+      setRotate(Math.floor(Math.random() * 20) - 10);
     }
   };
 
@@ -120,7 +123,8 @@ const PhotoCard = ({
       onPointerMove={handlePointerMove}
       onPointerUp={endInteraction}       
       onPointerCancel={endInteraction}   
-      onDragEnd={endInteraction}         
+      onDragEnd={endInteraction}
+      onDragStart={() => setIsDragging(true)}         
       onContextMenu={(e) => {
         if (isMobile) e.preventDefault(); 
       }}
@@ -138,7 +142,7 @@ const PhotoCard = ({
       className={`bg-white p-2 pb-4 md:p-4 md:pb-6 shadow-lg select-none flex flex-col items-center
         w-[156px] md:w-[282px] /* <--- 這裡控制外層白色相框寬度 */
         ${!isMobile ? "cursor-grab active:cursor-grabbing" : ""}
-        ${isDragging ? "cursor-grabbing shadow-2xl ring-4 ring-black/10" : ""}
+        ${isDragging ? "cursor-grabbing shadow-2xl" : ""}
       `}
     >
       <div
