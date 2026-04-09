@@ -3,7 +3,6 @@
 import { motion, AnimatePresence, useDragControls } from "framer-motion";
 import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
-// 【新增】：引入縮放與拖曳套件
 import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
 
 interface Media {
@@ -19,7 +18,7 @@ interface DisplayMedia extends Media {
 }
 
 // ==========================================
-// 獨立的照片卡片元件 (已修復 Android 微抖動與 PC 誤觸 Bug)
+// 獨立的照片卡片元件
 // ==========================================
 const PhotoCard = ({
   pic,
@@ -315,9 +314,10 @@ export default function GalleryClient({ initialPictures }: { initialPictures: Me
                 onClick={(e) => e.stopPropagation()} 
               />
             ) : (
-              // 【新增】：使用 TransformWrapper 包覆圖片，達成完美的雙擊放大、兩指縮放與拖曳
+              // 【核心修改】：移除了 w-full 和外層強制的寬高
+              // 現在這個 div 容器和 TransformComponent 會自動「縮水」到完全貼合圖片的真實尺寸
               <div 
-                className="w-full h-[85vh] flex items-center justify-center" 
+                className="relative flex items-center justify-center max-w-full max-h-[85vh]" 
                 onClick={(e) => e.stopPropagation()}
               >
                 <TransformWrapper
@@ -327,15 +327,13 @@ export default function GalleryClient({ initialPictures }: { initialPictures: Me
                   centerOnInit
                   wheel={{ step: 0.1 }}
                 >
-                  <TransformComponent 
-                    wrapperStyle={{ width: "100%", height: "100%" }} 
-                    contentStyle={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}
-                  >
+                  <TransformComponent>
                     <img
                       src={selectedPic.src}
                       alt="Full view"
-                      className="max-w-full max-h-[85vh] object-contain drop-shadow-2xl cursor-grab active:cursor-grabbing"
-                      draggable={false} // 禁用預設拖曳，讓套件完全接管
+                      // 移除了 object-contain，讓圖片依據最大寬高自然縮放
+                      className="max-w-full max-h-[85vh] drop-shadow-2xl cursor-grab active:cursor-grabbing rounded-md"
+                      draggable={false} 
                     />
                   </TransformComponent>
                 </TransformWrapper>
