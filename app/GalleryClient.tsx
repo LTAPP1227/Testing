@@ -286,14 +286,17 @@ export default function GalleryClient({ initialPictures }: { initialPictures: Me
         {visibleCount < pics.length && <p className="text-gray-400 text-sm tracking-widest">載入中...</p>}
       </div>
 
+      {/* ========================================== */}
+      {/* 放大檢視 (Lightbox) 核心修改區塊               */}
+      {/* ========================================== */}
       <AnimatePresence>
         {selectedPic && (
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/90 backdrop-blur-md p-4 md:p-12 cursor-pointer"
-            onClick={() => setSelectedPic(null)} 
+            className="fixed inset-0 z-[9999] flex items-center justify-center bg-black/90 backdrop-blur-md cursor-pointer"
+            onClick={() => setSelectedPic(null)} // 點擊黑色背景會關閉
           >
             <button 
               className="absolute top-6 right-6 md:top-10 md:right-10 text-white/70 hover:text-white transition-colors p-2 z-50"
@@ -310,34 +313,32 @@ export default function GalleryClient({ initialPictures }: { initialPictures: Me
                 controls 
                 autoPlay 
                 playsInline 
-                className="max-w-full max-h-[85vh] rounded-md shadow-2xl outline-none cursor-default" 
-                onClick={(e) => e.stopPropagation()} 
+                className="max-w-full max-h-[85vh] rounded-md shadow-2xl outline-none cursor-default z-10" 
+                onClick={(e) => e.stopPropagation()} // 點擊影片本體不會關閉
               />
             ) : (
-              // 【核心修改】：移除了 w-full 和外層強制的寬高
-              // 現在這個 div 容器和 TransformComponent 會自動「縮水」到完全貼合圖片的真實尺寸
-              <div 
-                className="relative flex items-center justify-center max-w-full max-h-[85vh]" 
-                onClick={(e) => e.stopPropagation()}
+              <TransformWrapper
+                initialScale={1}
+                minScale={1}
+                maxScale={5}
+                centerOnInit
+                wheel={{ step: 0.1 }}
               >
-                <TransformWrapper
-                  initialScale={1}
-                  minScale={1}
-                  maxScale={5}
-                  centerOnInit
-                  wheel={{ step: 0.1 }}
+                {/* 1. 讓 TransformComponent 撐滿全螢幕 (100vw, 100vh) */}
+                <TransformComponent 
+                  wrapperStyle={{ width: "100vw", height: "100vh" }} 
+                  contentStyle={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}
                 >
-                  <TransformComponent>
-                    <img
-                      src={selectedPic.src}
-                      alt="Full view"
-                      // 移除了 object-contain，讓圖片依據最大寬高自然縮放
-                      className="max-w-full max-h-[85vh] drop-shadow-2xl cursor-grab active:cursor-grabbing rounded-md"
-                      draggable={false} 
-                    />
-                  </TransformComponent>
-                </TransformWrapper>
-              </div>
+                  <img
+                    src={selectedPic.src}
+                    alt="Full view"
+                    className="max-w-full max-h-[85vh] drop-shadow-2xl cursor-grab active:cursor-grabbing rounded-md z-10"
+                    draggable={false} 
+                    // 2. 把阻擋點擊的指令移到 img 標籤上！
+                    onClick={(e) => e.stopPropagation()} 
+                  />
+                </TransformComponent>
+              </TransformWrapper>
             )}
           </motion.div>
         )}
