@@ -3,6 +3,8 @@
 import { motion, AnimatePresence, useDragControls } from "framer-motion";
 import { useState, useEffect, useRef } from "react";
 import Image from "next/image";
+// 【新增】：引入縮放與拖曳套件
+import { TransformWrapper, TransformComponent } from "react-zoom-pan-pinch";
 
 interface Media {
   src: string;
@@ -41,7 +43,7 @@ const PhotoCard = ({
   const dragControls = useDragControls();
   const timerRef = useRef<NodeJS.Timeout | null>(null);
   const hasMovedRef = useRef(false); 
-  const startPos = useRef({ x: 0, y: 0 }); // 新增：精準紀錄按下去的座標
+  const startPos = useRef({ x: 0, y: 0 }); 
   const videoRef = useRef<HTMLVideoElement>(null); 
 
   useEffect(() => {
@@ -52,7 +54,6 @@ const PhotoCard = ({
 
   const handlePointerDown = (e: React.PointerEvent) => {
     bringToFront(pic.id);
-    // 紀錄按下去的初始位置
     startPos.current = { x: e.clientX, y: e.clientY };
     
     if (isMobile) {
@@ -67,14 +68,13 @@ const PhotoCard = ({
             window.navigator.vibrate(50);
           }
         }
-      }, 300); // 300ms 是體驗最好的長按時間
+      }, 300); 
     }
   };
 
   const handlePointerMove = (e: React.PointerEvent) => {
     if (isMobile) {
       if (isReadyToDrag && !isDragging) {
-        // 長按完成，正式啟動拖曳！
         setIsDragging(true);
         try {
           dragControls.start(e, { snapToCursor: false });
@@ -82,7 +82,6 @@ const PhotoCard = ({
           console.error("Drag start failed", err);
         }
       } else if (!isReadyToDrag && !isDragging) {
-        // 【修復 Android Bug】：容忍 10px 內的微抖動
         const dx = Math.abs(e.clientX - startPos.current.x);
         const dy = Math.abs(e.clientY - startPos.current.y);
         if (dx > 10 || dy > 10) {
@@ -140,16 +139,14 @@ const PhotoCard = ({
         userSelect: "none"
       }}
       className={`bg-white p-2 pb-4 md:p-4 md:pb-6 shadow-lg select-none flex flex-col items-center
-        w-[156px] md:w-[282px] /* <--- 這裡控制外層白色相框寬度 */
+        w-[156px] md:w-[282px] 
         ${!isMobile ? "cursor-grab active:cursor-grabbing" : ""}
         ${isDragging ? "cursor-grabbing shadow-2xl" : ""}
       `}
     >
       <div
-        className="relative overflow-hidden bg-gray-100 
-          w-[140px] h-[150px] md:w-[250px] md:h-[250px]" /* <--- 這裡控制內部照片/影片的尺寸 */
+        className="relative overflow-hidden bg-gray-100 w-[140px] h-[150px] md:w-[250px] md:h-[250px]" 
         onClick={(e) => {
-          // 【修復 PC 誤觸 Bug】：精準計算距離，超過 5px 視為拖曳，拒絕放大
           const dx = Math.abs(e.clientX - startPos.current.x);
           const dy = Math.abs(e.clientY - startPos.current.y);
           if (dx > 5 || dy > 5 || isDragging) {
@@ -186,8 +183,7 @@ const PhotoCard = ({
         )}
       </div>
 
-      <div className="mt-3 text-center flex flex-col justify-start items-center w-full
-        h-[40px] md:h-[48px]"> 
+      <div className="mt-3 text-center flex flex-col justify-start items-center w-full h-[40px] md:h-[48px]"> 
         <h1 className="text-[10px] md:text-sm font-bold text-gray-700 truncate w-full px-1">
           {pic.title || "\u00A0"}
         </h1>
@@ -319,12 +315,31 @@ export default function GalleryClient({ initialPictures }: { initialPictures: Me
                 onClick={(e) => e.stopPropagation()} 
               />
             ) : (
-              <img
-                src={selectedPic.src}
-                alt="Full view"
-                className="max-w-full max-h-[85vh] object-contain drop-shadow-2xl cursor-default"
-                onClick={(e) => e.stopPropagation()} 
-              />
+              // 【新增】：使用 TransformWrapper 包覆圖片，達成完美的雙擊放大、兩指縮放與拖曳
+              <div 
+                className="w-full h-[85vh] flex items-center justify-center" 
+                onClick={(e) => e.stopPropagation()}
+              >
+                <TransformWrapper
+                  initialScale={1}
+                  minScale={1}
+                  maxScale={5}
+                  centerOnInit
+                  wheel={{ step: 0.1 }}
+                >
+                  <TransformComponent 
+                    wrapperStyle={{ width: "100%", height: "100%" }} 
+                    contentStyle={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center" }}
+                  >
+                    <img
+                      src={selectedPic.src}
+                      alt="Full view"
+                      className="max-w-full max-h-[85vh] object-contain drop-shadow-2xl cursor-grab active:cursor-grabbing"
+                      draggable={false} // 禁用預設拖曳，讓套件完全接管
+                    />
+                  </TransformComponent>
+                </TransformWrapper>
+              </div>
             )}
           </motion.div>
         )}
